@@ -1,8 +1,8 @@
 # mysql-assistant
 Pure Bash script for Generate/Restore Full Backup of MySQL Users and Databases in/to Normal or Container Base mode
 
-+ Generate/Restore Full backup of MySQL Users and Databases
-+ Worck both for MySQL server running in Container or Normal mode
++ Generate/Restore Full backup of MySQL `Users` and `Databases`
++ Worck both for MySQL server running in `Container` or `Normal` mode
 + Write the output log to `/var/log/mysql-assistant/`
 + Auto delete backup files older than 30 days
 + Easy to use as cron jobs
