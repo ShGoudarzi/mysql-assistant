@@ -49,7 +49,7 @@ G_MYSQL_DATABASES=""
 G_MYSQLDUMP_SWITCHES="--add-drop-database --add-drop-table --routines --triggers --create-options --complete-insert --single-transaction --quick --add-locks --flush-privileges "
 G_LOG_TYPE=""
 
-fun_check_if_running() {
+function check_if_running() {
   if [ -f $pidfile ]; then
     echo "script is already running"
     exit 0
@@ -58,25 +58,25 @@ fun_check_if_running() {
   fi
 }
 
-fun_finisher() {
+function finisher() {
   trap "rm -f -- '$pidfile'" EXIT
 }
 
 
 loader() {
-  fun_args_validator $@ 
-  fun_check_intractive 
-  fun_os_initializer
-  fun_check_mysql_local_login
-  fun_mysql_initializer
+  args_validator $@
+  check_intractive
+  os_initializer
+  check_mysql_local_login
+  mysql_initializer
 }
 
 
-fun_backup_path_generator() {
+function backup_path_generator() {
   echo "$1-$2-$3.$4"
 }
 
-fun_log_write() {
+function log_write() {
   if [ ! -d $LOG_DIR ]; then
     mkdir -p $LOG_DIR
   fi
@@ -92,18 +92,18 @@ fun_log_write() {
 
 }
 
-fun_check_mysql_local_login() {
+function check_mysql_local_login() {
   if [ "$G_MYSQL_ROOT_PASSWORD" == "" ] && [ "$G_CONTAINER_NAME" != "" ]; then
     local_login_status=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root >/dev/null 2>&1)
     if [ $? != 0 ]; then
       G_MYSQL_ROOT_PASSWORD=$(docker exec $G_CONTAINER_NAME env | egrep "[MYSQL|MARIADB]_ROOT_PASSWORD" | cut -d"=" -f2 2>&1)
       if [ "$G_MYSQL_ROOT_PASSWORD" == "" ]; then
         red
-        echo -e "***************** Mysql Root-Pass Not Found *****************" | fun_log_write
+        echo -e "***************** Mysql Root-Pass Not Found *****************" | log_write
         yellow
-        echo -e "pass the mysql root pass as env argument in mysql fun_container \nexample:   docker run --name some-mariadb -e MARIADB_ROOT_PASSWORD=my-secret-pw -d mariadb:latest" | fun_log_write
+        echo -e "pass the mysql root pass as env argument in mysql fun_container \nexample:   docker run --name some-mariadb -e MARIADB_ROOT_PASSWORD=my-secret-pw -d mariadb:latest" | log_write
         red
-        echo -e "*************************************************************" | fun_log_write
+        echo -e "*************************************************************" | log_write
         resetcolor
         exit 0
       fi
@@ -115,16 +115,16 @@ fun_check_mysql_local_login() {
   fi
 }
 
-fun_os_initializer() {
+function os_initializer() {
   if [ "$G_CONTAINER_NAME" != "" ]; then
     G_MYSQL=$(docker exec $G_CONTAINER_NAME whereis mysql | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
     G_MYSQLDUMP=$(docker exec $G_CONTAINER_NAME whereis mysqldump | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
 
   else
 
-    local_mysql=$(systemctl status mariadb.service | grep "running" >/dev/null 2>&1)
-    if [ $? -eq 1 ]; then
-      echo "MySQL not running/installed" | fun_log_write
+    local mysql_state=$(systemctl is-active mysql)
+    if [ "$mysql_state" != "active" ]; then
+      echo "MySQL not running/installed" | log_write
       exit 0
     fi
 
@@ -135,11 +135,11 @@ fun_os_initializer() {
 }
 
 
-fun_mysql_initializer() {
+function mysql_initializer() {
   if [ "$G_CONTAINER_NAME" != "" ]; then
 
     G_MYSQL_NAME=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
-      "SELECT VERSION()" | fun_log_write)
+      "SELECT VERSION()" | log_write)
     G_MYSQL_DATABASES=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
       "show databases;" | egrep -v "(mysql|performance_schema|information_schema|sys)")
 
@@ -155,7 +155,7 @@ fun_mysql_initializer() {
 }
 
 
-fun_args_validator() {
+function args_validator() {
   for i in $*; do
 
     if [ $(echo $i | cut -d "=" -f 1) == "--full-backup" ]; then
@@ -190,7 +190,7 @@ fun_args_validator() {
   done
 }
 
-fun_check_intractive() {
+function check_intractive() {
   if [ "$G_LOG_TYPE" == "restore" ] && [ "$INTERACTIVE" == "1" ]; then
     yellow
     printf "WARNING! "
@@ -208,12 +208,12 @@ fun_check_intractive() {
   fi
 }
 
-fun_auto_delete_older_backups(){
+function auto_delete_older_backups(){
   find $G_PATH -type f -name "*.gz" -mtime +$DAYS -delete
   find $LOG_DIR -type f -name "*.log" -ctime +$DAYS -delete
 }
 
-fun_help() {
+function help() {
   yellow
   echo -e "\n---Generating FullBackup---"
   echo -e "##############################"
@@ -246,21 +246,21 @@ fun_help() {
   resetcolor
 }
 
-fun_normal-full-export() {
-  echo -e "***********************************************************" | fun_log_write
-  echo -e "Dump operation has been started" | fun_log_write
-  echo -e "#####  Mode: Normal  #####" | fun_log_write
+function normal-full-export() {
+  echo -e "***********************************************************" | log_write
+  echo -e "Dump operation has been started" | log_write
+  echo -e "#####  Mode: Normal  #####" | log_write
 
   blue
-  echo -e "\nServer: $G_MYSQL_NAME ( $G_MYSQL_VERSION )" | fun_log_write
+  echo -e "\nServer: $G_MYSQL_NAME ( $G_MYSQL_VERSION )" | log_write
   resetcolor
 
   # Backup Users
-  users_out=$(fun_backup_path_generator $G_MYSQL_NAME "fullbackup_users" $DATE "sql")
+  users_out=$(backup_path_generator $G_MYSQL_NAME "fullbackup_users" $DATE "sql")
   until $($G_MYSQLDUMP -u root $G_MYSQL_ROOT_PASSWORD --system=users |
     sed 's/CREATE USER/CREATE USER IF NOT EXISTS/g' |
     sed -E '/root|mariadb.sys|mysql.sys|mysql.infoschema|mysql.session/d' \
-    > $users_out | fun_log_write); 
+    > $users_out | log_write);
 
   do
     sleep 1
@@ -268,29 +268,29 @@ fun_normal-full-export() {
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Creating Users Backup!" | fun_log_write
+    echo -e "problem on Creating Users Backup!" | log_write
     resetcolor
   else
     yellow
-    echo -e "Users Backup completed." | fun_log_write
+    echo -e "Users Backup completed." | log_write
     resetcolor
   fi
 
   # Backup Databases
-  databases_out=$(fun_backup_path_generator $G_MYSQL_NAME "fullbackup_databases" $DATE "sql")
+  databases_out=$(backup_path_generator $G_MYSQL_NAME "fullbackup_databases" $DATE "sql")
   until $($G_MYSQLDUMP -u root $G_MYSQL_ROOT_PASSWORD --databases $G_MYSQL_DATABASES $G_MYSQLDUMP_SWITCHES \
-    > $databases_out | fun_log_write); 
+    > $databases_out | log_write);
   do
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Creating Databases Backup!" | fun_log_write
+    echo -e "problem on Creating Databases Backup!" | log_write
     resetcolor
   else
     yellow
-    echo -e "Databases Backup completed." | fun_log_write
+    echo -e "Databases Backup completed." | log_write
     resetcolor
   fi
 
@@ -301,68 +301,68 @@ fun_normal-full-export() {
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Finalizing the result!" | fun_log_write
+    echo -e "problem on Finalizing the result!" | log_write
     resetcolor
     exit 0
   else
     yellow
-    echo -e "Backup file path: $G_PATH/$result" | fun_log_write
+    echo -e "Backup file path: $G_PATH/$result" | log_write
     green
-    echo -e "\n *** All Done! ***\n" | fun_log_write
+    echo -e "\n *** All Done! ***\n" | log_write
     resetcolor
   fi
 }
 
 ###################################
-fun_container-full-export() {
+function container-full-export() {
 
-  echo -e "***********************************************************" | fun_log_write
-  echo -e "Dump operation has been started" | fun_log_write
-  echo -e "#####  Mode: Container  #####" | fun_log_write
+  echo -e "***********************************************************" | log_write
+  echo -e "Dump operation has been started" | log_write
+  echo -e "#####  Mode: Container  #####" | log_write
 
   blue
-  echo -e "\nContainer: $G_CONTAINER_NAME ( $G_MYSQL_NAME )" | fun_log_write
+  echo -e "\nContainer: $G_CONTAINER_NAME ( $G_MYSQL_NAME )" | log_write
   resetcolor
 
   # Backup Users
-  users_out=$(fun_backup_path_generator $G_CONTAINER_NAME "fullbackup_users" $DATE "sql")
+  users_out=$(backup_path_generator $G_CONTAINER_NAME "fullbackup_users" $DATE "sql")
   until $(docker exec \
     $G_CONTAINER_NAME $G_MYSQLDUMP -u root $G_MYSQL_ROOT_PASSWORD --system=users |
     sed 's/CREATE USER/CREATE USER IF NOT EXISTS/g' |
     sed -E '/root|mariadb.sys|mysql.sys|mysql.infoschema|mysql.session/d' \
-    > $users_out | fun_log_write); 
+    > $users_out | log_write);
   do
-    echo -e "Creating users Backup is in progress..." | fun_log_write
+    echo -e "Creating users Backup is in progress..." | log_write
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Creating Users Backup!" | fun_log_write
+    echo -e "problem on Creating Users Backup!" | log_write
     resetcolor
   else
     yellow
-    echo -e "Users Backup completed." | fun_log_write
+    echo -e "Users Backup completed." | log_write
     resetcolor
   fi
 
   # Backup Databases
-  databases_out=$(fun_backup_path_generator $G_CONTAINER_NAME "fullbackup_databases" $DATE "sql")
+  databases_out=$(backup_path_generator $G_CONTAINER_NAME "fullbackup_databases" $DATE "sql")
   until $(docker exec \
     $G_CONTAINER_NAME $G_MYSQLDUMP -u root $G_MYSQL_ROOT_PASSWORD --databases $G_MYSQL_DATABASES $G_MYSQLDUMP_SWITCHES \
-    > $databases_out | fun_log_write); 
+    > $databases_out | log_write);
   do
-    echo -e "Creating databases Backup is in progress..." | fun_log_write
+    echo -e "Creating databases Backup is in progress..." | log_write
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Creating Databases Backup!" | fun_log_write
+    echo -e "problem on Creating Databases Backup!" | log_write
     resetcolor
   else
     yellow
-    echo -e "Databases Backup completed." | fun_log_write
+    echo -e "Databases Backup completed." | log_write
     resetcolor
   fi
 
@@ -373,78 +373,78 @@ fun_container-full-export() {
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Finalizing the result!" | fun_log_write
+    echo -e "problem on Finalizing the result!" | log_write
     resetcolor
     exit 0
   else
 
     yellow
-    echo -e "Backup file path: $G_PATH/$result" | fun_log_write
+    echo -e "Backup file path: $G_PATH/$result" | log_write
     green
-    echo -e "\n *** All Done! ***\n" | fun_log_write
+    echo -e "\n *** All Done! ***\n" | log_write
     resetcolor
   fi
 }
 
 #############################################################################
 
-fun_normal-full-import() {
+function normal-full-import() {
 
-  echo -e "***********************************************************" | fun_log_write
-  echo -e "Import operation has been started" | fun_log_write
-  echo -e "#####  Mode: Normal  #####" | fun_log_write
+  echo -e "***********************************************************" | log_write
+  echo -e "Import operation has been started" | log_write
+  echo -e "#####  Mode: Normal  #####" | log_write
 
-  tar -xvzf $G_PATH -C $TMP_RESTORE_DIR 2> fun_log_write
+  tar -xvzf $G_PATH -C $TMP_RESTORE_DIR 2> log_write
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Extracting backup file!" | fun_log_write
+    echo -e "problem on Extracting backup file!" | log_write
     resetcolor
     exit 0
   fi
 
   blue
-  echo -e "\nServer: $G_MYSQL_NAME ( $G_MYSQL_VERSION )" | fun_log_write
+  echo -e "\nServer: $G_MYSQL_NAME ( $G_MYSQL_VERSION )" | log_write
   resetcolor
 
   # Restore Users
   users_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_users-*.sql")
   until $($G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD \
-    < $users_file | fun_log_write);
+    < $users_file | log_write);
   do
-    echo -e "Restoring users Backup is in progress..." | fun_log_write
+    echo -e "Restoring users Backup is in progress..." | log_write
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Restore Users!" | fun_log_write
+    echo -e "problem on Restore Users!" | log_write
     resetcolor
     exit 0
   else
     yellow
-    echo -e "Users Restoration completed." | fun_log_write
+    echo -e "Users Restoration completed." | log_write
     resetcolor
   fi
 
   # Restore Databases --force
   db_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_databases-*.sql")
   until $($G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD \
-    < $db_file | fun_log_write); 
+    < $db_file | log_write);
   do
-    echo -e "Restoring databases Backup is in progress..." | fun_log_write
+    echo -e "Restoring databases Backup is in progress..." | log_write
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Restore Databases!" | fun_log_write
+    echo -e "problem on Restore Databases!" | log_write
     resetcolor
     exit 0
   else
     yellow
-    echo -e "Databases Restoration completed." | fun_log_write
+    echo -e "Databases Restoration completed." | log_write
     green
-    echo -e "\n *** All Done! ***\n" | fun_log_write
+    echo -e "\n *** All Done! ***\n" | log_write
     resetcolor;
     
   fi
@@ -452,41 +452,41 @@ fun_normal-full-import() {
 }
 
 ###################################
-fun_container-full-import() {
-  echo -e "***********************************************************" | fun_log_write
-  echo -e "Import operation has been started" | fun_log_write
-  echo -e "#####  Mode: Container  #####" | fun_log_write
+function container-full-import() {
+  echo -e "***********************************************************" | log_write
+  echo -e "Import operation has been started" | log_write
+  echo -e "#####  Mode: Container  #####" | log_write
 
-  tar -xvzf $G_PATH -C $TMP_RESTORE_DIR 2>fun_log_write
+  tar -xvzf $G_PATH -C $TMP_RESTORE_DIR 2>log_write
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Extracting backup file!" | fun_log_write
+    echo -e "problem on Extracting backup file!" | log_write
     resetcolor
     exit 0
   fi
 
   blue
-  echo -e "\nContainer: $G_CONTAINER_NAME ( $G_MYSQL_NAME )" | fun_log_write
+  echo -e "\nContainer: $G_CONTAINER_NAME ( $G_MYSQL_NAME )" | log_write
   resetcolor
 
   # Restore Users
   users_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_users-*.sql")
   until $(docker exec -i \
     $G_CONTAINER_NAME $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD \
-    < $users_file | fun_log_write); 
+    < $users_file | log_write);
   do
-    echo -e "Restoring users Backup is in progress..." | fun_log_write
+    echo -e "Restoring users Backup is in progress..." | log_write
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Restore Users!" | fun_log_write
+    echo -e "problem on Restore Users!" | log_write
     resetcolor
     exit 0
   else
     yellow
-    echo -e "Users Restoration completed." | fun_log_write
+    echo -e "Users Restoration completed." | log_write
     resetcolor
   fi
 
@@ -494,22 +494,22 @@ fun_container-full-import() {
   db_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_databases-*.sql")
   until $(docker exec -i \
     $G_CONTAINER_NAME $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD \
-    < $db_file | fun_log_write); 
+    < $db_file | log_write);
   do
-    echo -e "Restoring databases Backup is in progress..." | fun_log_write
+    echo -e "Restoring databases Backup is in progress..." | log_write
     sleep 1
   done
 
   if [ $? != 0 ]; then
     red
-    echo -e "problem on Restore Databases!" | fun_log_write
+    echo -e "problem on Restore Databases!" | log_write
     resetcolor
     exit 0
   else
     yellow
-    echo -e "Databases Restoration completed." | fun_log_write
+    echo -e "Databases Restoration completed." | log_write
     green
-    echo -e "\n *** All Done! ***\n" | fun_log_write
+    echo -e "\n *** All Done! ***\n" | log_write
     resetcolor
   fi
 
@@ -524,12 +524,12 @@ main-exporter() {
     cd $G_PATH
 
     if [ "$G_CONTAINER_NAME" != "" ]; then
-      fun_container-full-export
+      container-full-export
     else
-      fun_normal-full-export
+      normal-full-export
     fi
     
-    fun_auto_delete_older_backups
+    auto_delete_older_backups
 
   else
     printf "unknown input.\n"
@@ -544,9 +544,9 @@ main-importer() {
     fi
 
     if [ "$G_CONTAINER_NAME" != "" ]; then
-      fun_container-full-import
+      container-full-import
     else
-      fun_normal-full-import
+      normal-full-import
     fi
 
     rm -rf $TMP_RESTORE_DIR
@@ -558,8 +558,8 @@ main-importer() {
 }
 
 # MAIN SCRIPT
-fun_check_if_running
-fun_finisher
+check_if_running
+finisher
 
 if [ -z "$1" ]; then
   yellow
@@ -568,7 +568,7 @@ if [ -z "$1" ]; then
 
 else
   if [ "$1" == "--help" ]; then
-    fun_help
+    help
   else
     if [ "$#" -gt "1" ]; then
       echo " Preparing..."
