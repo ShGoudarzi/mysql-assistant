@@ -7,7 +7,7 @@ DAYS=30
 DATE=$(date +"%Y%m%d")
 RAND_NUM=$(echo $RANDOM)
 
-LOG_DIR="/var/log/mysqlAssistant"
+LOG_DIR="/var/log/mysql-assistant"
 BACKUP_LOG_FILE="$LOG_DIR/backup.log"
 RESTORE_LOG_FILE="$LOG_DIR/restore.log"
 TMP_RESTORE_DIR=/tmp/mysqlAssistant-$DATE-$RAND_NUM
