@@ -601,7 +601,7 @@ else
     help
   else
     if [ "$#" -gt "1" ]; then
-      echo "   Preparing..."
+      echo "Preparing..." | log_write
       loader $@
 
       case $1 in
