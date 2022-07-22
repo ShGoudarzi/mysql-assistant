@@ -1,9 +1,12 @@
 #!/bin/bash
+
 # MySQL Assistant Script Template
 # ---
 # This backup script can be used to automatically backup databases in docker containers and also from local host.
 # It currently supports mariadb, mysql and bitnami containers.
 # 
+
+
 #Copyright (c) 2022 Shayan Goudarzi ( me@ShGoudarzi.ir )
 
 #Permission is hereby granted, free of charge, to any person obtaining a copy
