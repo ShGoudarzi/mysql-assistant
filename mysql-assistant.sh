@@ -6,7 +6,7 @@
 # It currently supports mariadb, mysql and bitnami containers.
 # 
 
-
+################################################################################
 #Copyright (c) 2022 Shayan Goudarzi ( me@ShGoudarzi.ir )
 
 #Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -26,6 +26,8 @@
 #LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 #OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #SOFTWARE.
+################################################################################
+
 
 pidfile=/var/run/ma.sh.pid
 
