@@ -117,7 +117,7 @@ function log_write() {
   fi
 
   while read data; do
-    echo "[$(date +"%d/%B/%Y:%H:%M:%S %:::z")] $data" | tee -a $log_file | sed 's/\[.*]//'
+    echo "[$(date +"%d/%B/%Y:%H:%M:%S %:::z")]   $data" | tee -a $log_file | sed 's/\[.*]//'
   done
 
 }
@@ -601,7 +601,7 @@ else
     help
   else
     if [ "$#" -gt "1" ]; then
-      echo " Preparing..."
+      echo "   Preparing..."
       loader $@
 
       case $1 in
