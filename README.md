@@ -10,8 +10,8 @@ Pure Bash script for Generate/Restore Full Backup of MySQL Users and Databases i
 
 ## Download
 ```bash
-curl -o /usr/sbin/mysql-assistant.sh -L https://raw.githubusercontent.com/ShGoudarzi/mysql-assistant/main/mysql-assistant.sh \
-&& chmod +x /usr/sbin/mysql-assistant.sh
+curl -o /usr/bin/mysql-assistant.sh -L https://raw.githubusercontent.com/ShGoudarzi/mysql-assistant/main/mysql-assistant.sh \
+&& chmod +x /usr/bin/mysql-assistant.sh
 ```
 
 ## Usage
@@ -54,3 +54,12 @@ mysql-assistant.sh --help
 + mysql-assistant.sh   --full-restore --path=`/Backup/db-dailyBackup`
 
 
+-----------------------------------------------------------------
+
+-----------------------------------------------------------------
+
+### Cron Job
+```
+00 04 * * * mysql-assistant.sh --full-backup --path=`/Backup/db-dailyBackup` --container-name=`mariadb` >/dev/null 2>&1
+```
+> 💡 This will start backing up the databases, daily 4:00 AM
