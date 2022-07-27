@@ -60,6 +60,6 @@ mysql-assistant.sh --help
 
 ### Cron Job
 ```
-00 04 * * * mysql-assistant.sh --full-backup --path=`/Backup/db-dailyBackup` --container-name=`mariadb` >/dev/null 2>&1
+00 04 * * * mysql-assistant.sh --full-backup --path=/Backup/db-dailyBackup --container-name=mariadb >/dev/null 2>&1
 ```
 > 💡 This will start backing up the databases, daily 4:00 AM
