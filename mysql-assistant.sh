@@ -254,7 +254,7 @@ function help() {
   blue
   echo -e "Normal mode:"
   white
-  echo -e "mysql-assistant.sh --full-backup --path=/Backup/db-dailyBackup --container-name=mariadb \n"
+  echo -e "mysql-assistant.sh --full-backup --path=/Backup/db-dailyBackup \n"
   resetcolor
 
   yellow
