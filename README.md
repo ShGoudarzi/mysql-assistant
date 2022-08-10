@@ -4,7 +4,7 @@ Pure Bash script for Generate/Restore Full Backup of MySQL Users and Databases i
 + Generate/Restore Full backup of MySQL `Users` and `Databases`
 + Worck both for MySQL server running in `Container` or `Normal` mode
 + Write the output log to `/var/log/mysql-assistant.log`
-+ Auto delete backup files older than 30 days
++ Auto delete backup files older than 30 days (default)
 + Easy to use as cron jobs
 
 
@@ -26,6 +26,7 @@ mysql-assistant.sh --help
 | `--path` | - | `--path=/Backup/db-dailyBackup` | for generating Backup is Where to save backup file. for Restoring backup is the path of the backup file(.tar.gz) |
 | `--container-name` | - | `--container-name=mariadb` | Name of MySQL container ( If in container base mode ) |
 | `--mysql-root-pass` | `MySQL container env` | `--mysql-root-pass=12345` | MySQL root password ( Only necessary if not found automatically ) |
+| `--cleaner` | `-` | `--cleaner=90` | Auto delete backup archives older than 90 days past |
 > 💡 At generating full-backup mode you can also pass every mysqldump switches to the script for use during dumping databases ( like: --force )
 
 
