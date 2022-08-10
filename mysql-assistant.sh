@@ -32,7 +32,6 @@ tabs 2
 pidfile=/var/run/ma.sh.pid
 INTERACTIVE="1"
 
-DAYS=30
 DATE=$(date +"%Y%m%d")
 RAND_NUM=$(echo $RANDOM)
 
@@ -75,6 +74,8 @@ G_MYSQL_DATABASES=""
 G_MYSQLDUMP_SWITCHES="--add-drop-database --add-drop-table --routines --triggers --create-options --complete-insert --single-transaction --quick --add-locks "
 G_MYSQL_FLUSH="--flush-privileges"
 G_FORCE=""
+G_DAYS=30
+
 ###################
 G_MODE="Normal"
 G_LOG_TYPE=""
@@ -109,7 +110,7 @@ function backup_path_generator() {
 
 function log_print() {
   while read data; do
-    echo -e "[$(date +"%d/%b/%Y:%H:%M:%S %:::z")\t$G_LOG_TYPE]\t$data" | tee -a $LOG_FILE | sed 's/\[.*]//'
+    echo -e "[$(date +"%d/%b/%Y:%H:%M:%S %:::z")\t$G_LOG_TYPE]\t$data" | tee -a $LOG_FILE | sed 's/\[.*]//' | sed '/(INFO)/d'
   done
 
 }
@@ -205,6 +206,9 @@ function args_validator() {
     elif [ $(echo $i | cut -d "=" -f 1) == "--mysql-root-pass" ]; then
       G_MYSQL_ROOT_PASSWORD="$(echo $i | cut -d "=" -f 2)"
 
+    elif [ $(echo $i | cut -d "=" -f 1) == "--cleaner" ]; then
+      G_DAYS=$(echo $i | cut -d "=" -f 2)
+
     elif
       [ "$i" == "-f" ] || [ "$i" == "--force" ]; then
       G_FORCE="--force"
@@ -238,8 +242,9 @@ function check_intractive() {
 }
 
 function auto_delete_older_backups(){
-  find $G_PATH -type f -name "*.gz" -mtime +$DAYS -delete
-  find $LOG_FILE -ctime +$DAYS -delete
+  find $G_PATH -type f -name "*.gz" -mtime +$G_DAYS -delete
+#  find $LOG_FILE -ctime +$G_DAYS -delete
+  echo -e "(INFO) All backup archives older than $G_DAYS days have been deleted (from '$G_PATH') successfully"
 }
 
 function help() {
@@ -291,8 +296,12 @@ function backup_fun() {
     echo -e "#####  Mode: $G_MODE  #####"
     blue
     echo -e "$G_MYSQL_NAME ( $G_MYSQL_VERSION )"
-    echo ""
     resetcolor
+
+    echo -e "(INFO) Mysqldump switches: $G_MYSQLDUMP_SWITCHES"
+    echo -e "(INFO) Force: $G_FORCE"
+    echo ""
+    
 ### Backup Users
     echo -e "Creating users Backup is in progress..."
     users_out=$(backup_path_generator $G_MYSQL_NAME "fullbackup_users" $DATE "sql")
@@ -436,8 +445,9 @@ main-exporter() {
     fi
     cd $G_PATH
 
-    backup_fun
     auto_delete_older_backups
+    backup_fun
+    
 
   else
     printf "unknown input.\n"
