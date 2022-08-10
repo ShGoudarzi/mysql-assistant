@@ -84,6 +84,7 @@ G_LOG_TYPE=""
 function check_if_running() {
   if [ -f $pidfile ]; then
     echo "script is already running"
+    resetcolor;
     exit 0
   else
     echo $$ >"$pidfile"
@@ -398,19 +399,19 @@ function restore_fun() {
     echo -e "Restoring users Backup is in progress..."
     users_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_users-*.sql")
     $api $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD $G_FORCE \
-    < $users_file > $LOG_FILE 2>&1
+    < $users_file >> $LOG_FILE 2>&1
 
     if [ $? != 0 ]; then
       red
       echo -e "Problem on Restore Users!\n"
       white
       echo -e "Log: tail $LOG_FILE\n\n"
-      resetcolor
+      resetcolor;
       exit 0
     else
       yellow
       echo -e "Users Restoration completed."
-      resetcolor
+      resetcolor;
     fi
 
 
@@ -418,21 +419,21 @@ function restore_fun() {
     echo -e "Restoring databases Backup is in progress..."
     db_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_databases-*.sql")
     $api $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD $G_FORCE \
-    < $db_file > $LOG_FILE 2>&1
+    < $db_file >> $LOG_FILE 2>&1
 
     if [ $? != 0 ]; then
       red
       echo -e "problem on Restore Databases!\n"
       white
       echo -e "Log: tail $LOG_FILE\n\n"
-      resetcolor
+      resetcolor;
       exit 0
     else
       yellow
       echo -e "Databases Restoration completed."
       green
       echo -e "\n *** All Done! ***\n"
-      resetcolor
+      resetcolor;
     fi
 }
 
@@ -447,8 +448,8 @@ main-exporter() {
 
     auto_delete_older_backups
     backup_fun
+    resetcolor;
     
-
   else
     printf "unknown input.\n"
     exit 0
@@ -463,6 +464,7 @@ main-importer() {
 
     restore_fun
     rm -rf $TMP_RESTORE_DIR
+    resetcolor;
 
   else
     printf "unknown input.\n"
