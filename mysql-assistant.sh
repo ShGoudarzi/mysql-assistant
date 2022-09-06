@@ -117,7 +117,7 @@ function log_print() {
 }
 
 function check_mysql_local_login() {
-  if [ "$G_MYSQL_ROOT_PASSWORD" == "" ] && [ "$G_CONTAINER_NAME" != "" ]; then
+  if [ "$G_CONTAINER_NAME" != "" ]; then
     local_login_status=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root >/dev/null 2>&1)
     if [ $? != 0 ]; then
       G_MYSQL_ROOT_PASSWORD=$(docker exec $G_CONTAINER_NAME env | egrep "[MYSQL|MARIADB]_ROOT_PASSWORD" | cut -d"=" -f2 2>&1)
@@ -141,9 +141,9 @@ function check_mysql_local_login() {
 
 function os_initializer() {
   if [ "$G_CONTAINER_NAME" != "" ]; then
-    G_MYSQL=$(docker exec $G_CONTAINER_NAME whereis mysql | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
-    G_MYSQLDUMP=$(docker exec $G_CONTAINER_NAME whereis mysqldump | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
-
+    G_MYSQL=$(docker exec $G_CONTAINER_NAME whereis mysql | cut -d ":" -f 2)
+    G_MYSQLDUMP=$(docker exec $G_CONTAINER_NAME whereis mysqldump | cut -d ":" -f 2)
+    
   else
 
     local mysql_state=$(systemctl is-active mysql)
@@ -156,8 +156,20 @@ function os_initializer() {
     G_MYSQLDUMP=$(whereis mysqldump | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
 
   fi
+  
+  G_MYSQL=$(validate_mysql_path $G_MYSQL)
+  G_MYSQLDUMP=$(validate_mysql_path $G_MYSQLDUMP)
 }
 
+function validate_mysql_path(){
+  for i in $@;
+  do
+    state=$(docker exec $G_CONTAINER_NAME $i 2>&1)
+    if [[ $? == 0 || $? == 1 ]]; then
+      echo $i
+    fi
+  done
+}
 
 function mysql_initializer() {
   if [ "$G_CONTAINER_NAME" != "" ]; then
