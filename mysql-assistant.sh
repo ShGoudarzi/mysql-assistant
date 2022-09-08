@@ -371,6 +371,7 @@ function backup_fun() {
 
     yellow
       echo -e "Backup file path: $G_PATH/$result"
+      echo -e "Backup file size: $(ls -lh $G_PATH/$result | awk '{print  $5}')"
       green
       echo -e "\n *** All Done! ***\n"
       resetcolor
