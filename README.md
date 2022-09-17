@@ -64,3 +64,9 @@ mysql-assistant.sh --help
 00 04 * * * mysql-assistant.sh --full-backup --path=/Backup/db-dailyBackup --container-name=mariadb >/dev/null 2>&1
 ```
 > 💡 This will start backing up the databases, daily 4:00 AM
+
+
+
+
+-----------------------------------------------------------------
+##### Server Fullbackup Script: https://github.com/ShGoudarzi/backup-assistant
