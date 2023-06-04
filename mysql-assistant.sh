@@ -1,49 +1,26 @@
 #!/bin/bash
-#===============================================================================
-#
-#           DIR: /etc/backup-assistant
-#
-#         USAGE: backup-assistant.sh , backup-assistant.sh --force
-#
-#   DESCRIPTION: create a gz backup of your files and upload them to ftp,ssh server
-#
-#  REQUIREMENTS: curl, gpg, rsync, ftp 
-#        AUTHOR: Shayan Goudarzi, me@shayangoudarzi.ir
-#  ORGANIZATION: Linux
-#       CREATED: 09/16/2022
-#===============================================================================
-export TOP_PID=$$
-export ARGS=($@)
 
+# MySQL Assistant Script Template
+# ---
+# This backup script can be used to automatically backup databases in docker containers and also from local host.
+# It currently supports mariadb, mysql and bitnami containers.
+#
+
+################################################################################
+# Copyright (c) 2022 Shayan Goudarzi ( me@ShGoudarzi.ir )
+################################################################################
+
+
+tabs 2
+pidfile=/var/run/ma.sh.pid
+INTERACTIVE="1"
 
 DATE=$(date +"%Y%m%d")
-NOW=$(date +"%d/%b/%Y:%H:%M:%S %:::z")
-HOSTNAME=$(hostname -s)
-LOG_FILE="/var/log/backup-assistant.log"
-tmp_log="/tmp/backup-assistant.log"
+RAND_NUM=$(echo $RANDOM)
 
-pidfile=/var/run/ba.sh.pid
-config_path="/etc/backup-assistant"
-intervalConfigFiles_path="$config_path/source"
+LOG_FILE="/var/log/mysql-assistant.log"
+TMP_RESTORE_DIR=/tmp/mysqlAssistant-$DATE-$RAND_NUM
 
-week_day=$(date +"%u") 
-week_backup_day="5" # 5:friday
-
-month_day=$(date +"%d")
-month_backup_day="28"
-
-G_daily_fileName="backup.daily"
-G_weekly_fileName="backup.weekly"
-G_monthly_fileName="backup.monthly"
-
-
-#### STATUS 
-SSH_CONNECTION_STATUS=1
-FTP_CONNECTION_STATUS=1
-
-
-
-### Colors
 red() {
   tput bold
   tput setaf 1
@@ -68,37 +45,32 @@ resetcolor() {
   tput sgr0
 }
 
+#######################
+G_PATH=""
+G_CONTAINER_NAME=""
+G_MYSQL_ROOT_PASSWORD=""
+G_MYSQL=""
+G_MYSQLDUMP=""
+G_MYSQL_NAME=""
+G_MYSQL_VERSION=""
+G_MYSQL_DATABASES=""
+G_MYSQLDUMP_SWITCHES="--add-drop-database --add-drop-table --routines --triggers --create-options --complete-insert --single-transaction --quick --add-locks "
+G_MYSQL_FLUSH="--flush-privileges"
+G_FORCE=""
+G_DAYS=30
 
+###################
+G_MODE="Normal"
+G_LOG_TYPE=""
 
-##### Functions #####
-
-function log_print() {
-  while read data; do
-    echo -e "$(date +"%d/%b/%Y:%H:%M:%S %:::z") $data" | tee -a $LOG_FILE
-  done
-}
 
 function check_if_running() {
-  if [ -f $pidfile ]; 
-  then
-
-    echo -e "script is already running"  | log_print
+  if [ -f $pidfile ]; then
+    echo "script is already running"
     resetcolor;
-
-    local old_pid=$( cat $pidfile )
-    if [ "${ARGS[0]}" == "--force" ]; then
-        echo -e "clean script start..."  | log_print
-        kill -9 $old_pid
-        rm -rf $pidfile
-        echo $TOP_PID >"$pidfile"
-    else
-        echo -e "run script by --force to skip limitation "  | log_print
-        exit 0
-    fi
-
-
+    exit 0
   else
-    echo $TOP_PID >"$pidfile"
+    echo $$ >"$pidfile"
   fi
 }
 
@@ -107,420 +79,427 @@ function finisher() {
 }
 
 
-
-function checkDpnd {
-   command -v curl >/dev/null 2>&1 || { echo -e "I require 'curl' but it's not installed. Please install it and try again." | log_print; kill -s 1 "$TOP_PID"; }
-   command -v gpg >/dev/null 2>&1 || { echo -e "I require 'gpg' but it's not installed. Please install it and try again." | log_print; kill -s 1 "$TOP_PID"; }
-   command -v rsync >/dev/null 2>&1 || { echo -e "I require 'rsync' but it's not installed. Please install it and try again." | log_print; kill -s 1 "$TOP_PID"; }
-   command -v ftp >/dev/null 2>&1 || { echo -e "I require 'ftp' but it's not installed. Please install it and try again." | log_print; kill -s 1 "$TOP_PID"; }
+loader() {
+  args_validator $@
+  check_intractive
+  os_initializer
+  check_mysql_local_login
+  mysql_initializer
 }
 
-function config_check() {
-    if [ ! -f $config_path/main.conf ];
-    then
-        mkdir -p $intervalConfigFiles_path > /dev/null 2>&1
-        cat <<EOF > $config_path/main.conf
 
-### Path ###
-local_save_path="/local-backup/"
-ftp_save_path="/ftp-backup/"
-ssh_save_path="/ssh-backup/"
+function backup_path_generator() {
+  echo "$1-$2-$3.$4"
+}
 
-### Encryption ###
-encryption_enable="no"
-encryption_name="$HOSTNAME"
+function log_print() {
+  while read data; do
+    echo -e "[$(date +"%d/%b/%Y:%H:%M:%S %:::z")\t$G_LOG_TYPE]\t$data" | tee -a $LOG_FILE | sed 's/\[.*]//' | sed '/(INFO)/d'
+  done
 
+}
 
-### FTP method ###
-ftp_enable="no"
-ftp_server="ftp.example.com"
-ftp_username="ftpuser"
-ftp_password="ftppassword"
-
-### SSH method ###
-ssh_enable="no"
-ssh_server="ssh.example.com"
-ssh_port=22
-ssh_username="root"
-
-
-#### Clean ###
-local_save_last_versions=4
-ftp_save_last_versions=12
-ssh_save_last_versions=12
-EOF
-
-        cat <<EOF >>$intervalConfigFiles_path/$G_weekly_fileName
-# Put you Absolute path bellow and seprate them by ENTER
-$HOME
-EOF
-
-        touch $intervalConfigFiles_path/$G_daily_fileName $intervalConfigFiles_path/$G_monthly_fileName
-        echo -e "$NOW script has been installed successfully\n$NOW write your paths in source config files: $intervalConfigFiles_path"
+function check_mysql_local_login() {
+  if [ "$G_CONTAINER_NAME" != "" ]; then
+    local_login_status=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root >/dev/null 2>&1)
+    if [ $? != 0 ]; then
+      G_MYSQL_ROOT_PASSWORD=$(docker exec $G_CONTAINER_NAME env | egrep "[MYSQL|MARIADB]_ROOT_PASSWORD" | cut -d"=" -f2 2>&1)
+      if [ "$G_MYSQL_ROOT_PASSWORD" == "" ]; then
+        red
+        echo -e "***************** Mysql Root-Pass Not Found *****************" | log_print
+        yellow
+        echo -e "pass the mysql root pass as env argument in mysql fun_container \nexample:   docker run --name some-mariadb -e MARIADB_ROOT_PASSWORD=my-secret-pw -d mariadb:latest" | log_print
+        red
+        echo -e "*************************************************************" | log_print
+        resetcolor
         exit 0
+      fi
     fi
-}
-
-
-### init
-echo -e "###########################" | log_print
-echo -e "Preparing..." | log_print
-
-check_if_running
-finisher
-checkDpnd
-config_check
-
-#loading conf
-source $config_path/main.conf
-
-
-### init
-i_config_files=()
-interval_config_files=$(find $intervalConfigFiles_path -type f | grep -E "$G_daily_fileName|$G_weekly_fileName|$G_monthly_fileName" | xargs)
-for interval_config_file in $interval_config_files;
-do
-    if [ $(cat $interval_config_file | wc -l) -ne 0 ];
-    then
-
-        input_name=$(basename $interval_config_file)
-        case $input_name in 
-
-           $G_daily_fileName)
-             i_config_files+=($input_name) 
-             ;;
-
-           $G_weekly_fileName)
-             if [ $week_day == $week_backup_day ];
-             then
-                 i_config_files+=($input_name)
-             fi
-             ;;
-
-           $G_monthly_fileName)
-             if [ $month_day == $month_backup_day ];
-             then
-                 i_config_files+=($input_name)
-             fi 
-             ;; 
-        esac
-    fi
-
-done 
-
-
-if [ -z "$i_config_files" ]; 
-then
-    echo -e "Not found any source config files or today is not the backup day!" | log_print
-    exit 0
-fi
-
-
-
-sleep 1;
-###########################
-##### Creating Backup #####
-###########################
-
-
-# Create Backup
-yellow;
-echo "Creating Backup archives..." | log_print
-resetcolor;
-
-i_result_files=()
-for source_file in ${i_config_files[@]};
-do
-    ext=$(echo $source_file | cut -d "." -f 2)
-    result_pre_path=$local_save_path/$ext
-    mkdir -p $result_pre_path > /dev/null 2>&1
-
-    source_file_path=$intervalConfigFiles_path/$source_file
-    source_file_contents=$(cat $source_file_path | sed '/^[[:space:]]*$/d' | sed '/^#/d' | xargs)
-    result=$result_pre_path/$ext-fullbackup-$HOSTNAME-$DATE.tar.gz
-
-    tar -czf $result $source_file_contents > /dev/null 2>&1
-    i_result_files+=($result)
-      
-done
-green;
-echo -e "Backup archives has have been created successfully" | log_print
-resetcolor;
-
-
-
-# GPG Encryption 
-if [ "$encryption_enable" == "yes" ];
-then
-    yellow;
-    echo -e "Encrypting Backup archives..." | log_print
-    resetcolor;
-
-    counter=0
-    for res in ${i_result_files[@]};
-    do
-        gpg --always-trust -e -r "$encryption_name" $res
-
-        if [ $? -ne 0 ]
-        then
-            red;
-            echo -e "Encrypting backup archives FAILD" | log_print
-            resetcolor;
-            exit 0;      
-        fi
-
-        rm -rf $res
-        i_result_files[$counter]="$res.gpg"
-        counter=$counter+1
-
-    done
-
-    green;
-    echo -e "Encrypting backup archives has have been completed successfully" | log_print
-    resetcolor;
-fi
-
-
-sleep 1;
-###########################
-##### Uploading #####
-###########################
-
-
-### FTP Upload
-if [ "$ftp_enable" == "yes" ];
-then
-    is_ok=1
-
-    yellow;
-    echo -e "Uploading to FTP-server..." | log_print
-    resetcolor;
-
-    for res in ${i_result_files[@]};
-    do  
-        input=$(echo $local_save_path | sed 's/\//\\\//g')
-        ftp_save_path=$(echo $ftp_save_path | sed 's/\//\\\//g')
-        path=$(dirname $res | sed -e "s/$input/$ftp_save_path/")
-        curl --show-error --connect-timeout 10 --retry 3 --retry-delay 30 --upload-file $res --ftp-create-dirs "ftp://$ftp_server:21/$path/" --user "$ftp_username:$ftp_password"
-       
-        if [ $? -ne 0 ]
-        then
-            red;
-            echo -e "Uploading to FTP-server FAILD" | log_print
-            resetcolor;  
-            FTP_CONNECTION_STATUS=0 
-            is_ok=0   
-        fi
-
-    done
-
-
-    if [ $is_ok -eq 1 ]
-    then
-      green;
-      echo -e "Uploading to FTP-server has have been completed successfully." | log_print
-      resetcolor;
-    fi
-fi
-
-
-### SSH Upload
-if [ "$ssh_enable" == "yes" ];
-then
-    is_ok=1
-
-    yellow;
-    echo -e "Uploading to SSH-server..." | log_print
-    resetcolor;
-
-
-    for res in ${i_result_files[@]};
-    do  
-        input=$(echo $local_save_path | sed 's/\//\\\//g')
-        ssh_save_path=$(echo $ssh_save_path | sed 's/\//\\\//g')
-        path=$(dirname $res | sed -e "s/$input/$ssh_save_path/") 
-        ssh -t $ssh_username@$ssh_server -p $ssh_port -o StrictHostKeyChecking=no "mkdir -p /$path/"
-        rsync -avh -e "ssh -p $ssh_port -o StrictHostKeyChecking=no" $res $ssh_username@$ssh_server:/$path/ | log_print
-       
-        if [ $? -ne 0 ]
-        then
-            red;
-            echo -e "Uploading to SSH-server FAILD" | log_print
-            resetcolor;
-            SSH_CONNECTION_STATUS=0
-            is_ok=0    
-        fi
-
-    done
-
-    if [ $is_ok -eq 1 ]
-    then
-      green;
-      echo -e "Uploading to SSH-server has have been completed successfully." | log_print
-      resetcolor;
-    fi
-
-fi
-
-
-
-sleep 1;
-###########################
-##### Cleaning #####
-###########################
-
-
-### Local
-yellow;
-echo -e "Cleaning local backups older than $local_save_last_versions last old versions..." | log_print
-resetcolor;
-
-i_local_queue=()
-for source_file in ${i_config_files[@]};
-do
-  source_file=$(echo $source_file | cut -d "." -f 2)
-  local_path_dir=$local_save_path/$source_file
-
-  count=$(( $(ls -ltr $local_path_dir | grep "^-r" | wc -l) - $local_save_last_versions ))
-  if [ $count -gt 0 ]; 
-  then
-      files=$(ls -ltr $local_path_dir | grep "^-r" | head -n $count | awk '{print $NF}' | awk -F ' ' -v awklocal_path_dir="$local_path_dir/" '{print awklocal_path_dir $1}' | xargs)
-      i_local_queue+=($files)
   fi
 
-done
+  if [ "$G_MYSQL_ROOT_PASSWORD" != "" ]; then
+    G_MYSQL_ROOT_PASSWORD="-p$G_MYSQL_ROOT_PASSWORD"
+  fi
+}
 
-if [ -z "$i_local_queue" ]; 
-then
-    echo -e "ّNot need." | log_print
+function os_initializer() {
+  if [ "$G_CONTAINER_NAME" != "" ]; then
+    G_MYSQL=$(docker exec $G_CONTAINER_NAME whereis mysql | cut -d ":" -f 2)
+    G_MYSQLDUMP=$(docker exec $G_CONTAINER_NAME whereis mysqldump | cut -d ":" -f 2)
+    
+  else
+
+    local mysql_state=$(systemctl is-active mysql)
+    if [ "$mysql_state" != "active" ]; then
+      echo "MySQL not running/installed" | log_print
+      exit 0
+    fi
+
+    G_MYSQL=$(whereis mysql | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
+    G_MYSQLDUMP=$(whereis mysqldump | cut -d ":" -f 2 | awk '{ print $1 }' | xargs echo)
+
+  fi
+  
+  G_MYSQL=$(validate_mysql_path $G_MYSQL)
+  G_MYSQLDUMP=$(validate_mysql_path $G_MYSQLDUMP)
+}
+
+function validate_mysql_path(){
+  for i in $@;
+  do
+    state=$(docker exec $G_CONTAINER_NAME $i 2>&1)
+    if [[ $? == 0 || $? == 1 ]]; then
+      echo $i
+    fi
+  done
+}
+
+function mysql_initializer() {
+  if [ "$G_CONTAINER_NAME" != "" ]; then
+
+    G_MYSQL_NAME=$G_CONTAINER_NAME
+    G_MYSQL_VERSION=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
+      "SELECT VERSION()" )
+    G_MYSQL_DATABASES=$(docker exec $G_CONTAINER_NAME $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
+      "show databases;" | egrep -v "(mysql|performance_schema|information_schema|sys)")
+
+  else
+
+    G_MYSQL_NAME=$($G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
+      "STATUS;" | grep "Server:" | awk -F ' ' '{print $2}')
+    G_MYSQL_VERSION=$($G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
+      "SELECT VERSION()")
+    G_MYSQL_DATABASES=$($G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD --skip-column-names -A -e \
+      "show databases;" | egrep -v "(mysql|performance_schema|information_schema|sys)")
+  fi
+}
+
+
+function args_validator() {
+  for i in $*; do
+
+    if [ $(echo $i | cut -d "=" -f 1) == "--full-backup" ]; then
+      G_LOG_TYPE="Backup"
+
+    elif [ $(echo $i | cut -d "=" -f 1) == "--full-restore" ]; then
+      G_LOG_TYPE="Restore"
+
+    elif [ $(echo $i | cut -d "=" -f 1) == "--path" ]; then
+      G_PATH="$(echo $i | cut -d "=" -f 2 | sed 's/\/$//')"
+
+    elif [ $(echo $i | cut -d "=" -f 1) == "--container-name" ]; then
+      G_CONTAINER_NAME="$(echo $i | cut -d "=" -f 2)"
+      container_exist=$(docker ps --format {{.Names}} | egrep "^($G_CONTAINER_NAME)$" | wc -w)
+      if [ "$container_exist" == "0" ]; then
+        red
+        echo -e "Container( $G_CONTAINER_NAME ) is not running/exists" | log_print
+        resetcolor
+        exit 0
+      fi
+
+      G_MODE="Container"
+
+    elif [ $(echo $i | cut -d "=" -f 1) == "--mysql-root-pass" ]; then
+      G_MYSQL_ROOT_PASSWORD="$(echo $i | cut -d "=" -f 2)"
+
+    elif [ $(echo $i | cut -d "=" -f 1) == "--cleaner" ]; then
+      G_DAYS=$(echo $i | cut -d "=" -f 2)
+
+    elif
+      [ "$i" == "-f" ] || [ "$i" == "--force" ]; then
+      G_FORCE="--force"
+
+    elif [ "$i" == "-y" ]; then
+      INTERACTIVE="0"
+
+    else
+      G_MYSQLDUMP_SWITCHES="$G_MYSQLDUMP_SWITCHES $i"
+    fi
+
+  done
+}
+
+function check_intractive() {
+  if [ "$G_LOG_TYPE" == "Restore" ] && [ "$INTERACTIVE" == "1" ]; then
+    yellow
+    printf "\tWARNING! "
+    resetcolor
+    printf "This will Remove all existing databases and tables.\n"
+    white
+    printf "\tAre you sure you want to continue? [y/N] "
+    resetcolor
+
+    read INPUT
+    if [ "$INPUT" == "N" ]; then
+      echo -e "\tOperation has been cancelled..."
+      exit 0
+    fi
+  fi
+}
+
+function auto_delete_older_backups(){
+  find $G_PATH -type f -name "*.gz" -mtime +$G_DAYS -delete
+#  find $LOG_FILE -ctime +$G_DAYS -delete
+  echo -e "(INFO) All backup archives older than $G_DAYS days have been deleted (from '$G_PATH') successfully"
+}
+
+function help() {
+  yellow
+  echo -e "\n---Generating FullBackup---"
+  echo -e "##############################"
+  blue
+  echo -e "Container mode:"
+  white
+  echo -e "mysql-assistant.sh --full-backup --path=/Backup/db-dailyBackup --container-name=mariadb \n"
+  blue
+  echo -e "Normal mode:"
+  white
+  echo -e "mysql-assistant.sh --full-backup --path=/Backup/db-dailyBackup \n"
+  resetcolor
+
+  yellow
+  echo -e "---Restoring FullBackup---"
+  echo -e "##############################"
+  blue
+  echo -e "Container mode:"
+  white
+  echo -e "mysql-assistant.sh --full-restore --path=/Backup/db-dailyBackup/sample-backup-file.tar.gz --container-name=mariadb \n"
+  blue
+  echo -e "Normal mode:"
+  white
+  echo -e "mysql-assistant.sh --full-restore --path=/Backup/db-dailyBackup \n"
+  resetcolor
+
+  echo -e "for more help please visit:"
+  green
+  echo -e "https://github.com/ShGoudarzi/mysql-assistant \n"
+  resetcolor
+}
+
+
+function backup_fun() {
+    local api=""
+    if [ "$G_MODE" == "Normal" ]; then
+        api=""
+    fi
+    if [ "$G_MODE" == "Container" ]; then
+        api="docker exec $G_MYSQL_NAME"
+    fi
+
+
+    echo -e "***********************************************************"
+    echo -e "$G_LOG_TYPE operation has been started"
+    echo -e "#####  Mode: $G_MODE  #####"
+    blue
+    echo -e "$G_MYSQL_NAME ( $G_MYSQL_VERSION )"
+    resetcolor
+
+    echo -e "(INFO) Mysqldump switches: $G_MYSQLDUMP_SWITCHES"
+    echo -e "(INFO) Force: $G_FORCE"
+    echo ""
+    
+### Backup Users
+    echo -e "Creating users Backup is in progress..."
+    users_out=$(backup_path_generator $G_MYSQL_NAME "fullbackup_users" $DATE "sql")
+    $api $G_MYSQLDUMP -u root $G_MYSQL_ROOT_PASSWORD --system=users $G_MYSQL_FLUSH $G_FORCE |
+      sed 's/CREATE USER/CREATE USER IF NOT EXISTS/g' |
+      sed -E '/root|mariadb.sys|mysql.sys|mysql.infoschema|mysql.session/d' \
+      1> $users_out 2> >(tee -a $LOG_FILE)
+
+    if [ $? != 0 ]; then
+      red
+      echo -e "Problem on Creating Users Backup!\n"
+      white
+      echo -e "Log: tail $LOG_FILE\n\n"
+      resetcolor
+      exit 0
+    else
+      yellow
+      echo -e "Users Backup completed."
+      resetcolor
+    fi
+
+### Backup Databases
+    echo -e "Creating databases Backup is in progress..."
+    databases_out=$(backup_path_generator $G_MYSQL_NAME "fullbackup_databases" $DATE "sql")
+    $api $G_MYSQLDUMP -u root $G_MYSQL_ROOT_PASSWORD --databases $G_MYSQL_DATABASES $G_MYSQLDUMP_SWITCHES $G_MYSQL_FLUSH $G_FORCE \
+      1> $databases_out 2> >(tee -a $LOG_FILE)
+
+    if [ $? != 0 ]; then
+      red
+      echo -e "Problem on Creating Databases Backup!\n"
+      white
+      echo -e "Log: tail $LOG_FILE\n\n"
+      resetcolor
+      exit 0
+    else
+      yellow
+      echo -e "Databases Backup completed."
+      resetcolor
+    fi
+
+### Compress as an archive
+    result="$G_MYSQL_NAME"_"mysql-assistant_fullbackup-$DATE.tar.gz"
+    tar -czf $result $users_out $databases_out \
+      && rm -f $users_out $databases_out
+
+    if [ $? != 0 ]; then
+      red
+      echo -e "problem on Finalizing the result!\n"
+      white
+      echo -e "Log: tail $LOG_FILE\n\n"
+      resetcolor
+      exit 0
+    else
+
+    yellow
+      echo -e "Backup file path: $G_PATH/$result"
+      echo -e "Backup file size: $(ls -lh $G_PATH/$result | awk '{print  $5}')"
+      green
+      echo -e "\n *** All Done! ***\n"
+      resetcolor
+    fi
+}
+
+########################################################
+
+function restore_fun() {
+    local api=""
+    if [ "$G_MODE" == "Normal" ]; then
+        api=""
+    fi
+    if [ "$G_MODE" == "Container" ]; then
+        api="docker exec -i $G_MYSQL_NAME"
+    fi
+
+
+    echo -e "***********************************************************"
+    echo -e "$G_LOG_TYPE operation has been started"
+    echo -e "#####  Mode: $G_MODE  #####"
+    blue
+    echo -e "$G_MYSQL_NAME ( $G_MYSQL_VERSION )"
+    echo ""
+    resetcolor
+### Restore
+    tar -xvzf $G_PATH -C $TMP_RESTORE_DIR 2> >(tee -a $LOG_FILE)
+    if [ $? != 0 ]; then
+      red
+      echo -e "Problem on Extracting backup file!\n"
+      white
+      echo -e "Log: tail $LOG_FILE\n\n"
+      resetcolor
+      exit 0
+    fi
+
+### Restore Users
+    echo -e "Restoring users Backup is in progress..."
+    users_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_users-*.sql")
+    $api $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD $G_FORCE \
+    < $users_file >> $LOG_FILE 2>&1
+
+    if [ $? != 0 ]; then
+      red
+      echo -e "Problem on Restore Users!\n"
+      white
+      echo -e "Log: tail $LOG_FILE\n\n"
+      resetcolor;
+      exit 0
+    else
+      yellow
+      echo -e "Users Restoration completed."
+      resetcolor;
+    fi
+
+
+### Restore Databases
+    echo -e "Restoring databases Backup is in progress..."
+    db_file=$(find $TMP_RESTORE_DIR -name "*-fullbackup_databases-*.sql")
+    $api $G_MYSQL -u root $G_MYSQL_ROOT_PASSWORD $G_FORCE \
+    < $db_file >> $LOG_FILE 2>&1
+
+    if [ $? != 0 ]; then
+      red
+      echo -e "problem on Restore Databases!\n"
+      white
+      echo -e "Log: tail $LOG_FILE\n\n"
+      resetcolor;
+      exit 0
+    else
+      yellow
+      echo -e "Databases Restoration completed."
+      green
+      echo -e "\n *** All Done! ***\n"
+      resetcolor;
+    fi
+}
+
+
+main-exporter() {
+  if [ "$G_PATH" != "" ]; then
+
+    if [ ! -d $G_PATH ]; then
+      mkdir -p $G_PATH
+    fi
+    cd $G_PATH
+
+    auto_delete_older_backups
+    backup_fun
+    resetcolor;
+    
+  else
+    printf "unknown input.\n"
+    exit 0
+  fi
+}
+
+main-importer() {
+  if [ "$G_PATH" != "" ]; then
+    if [ ! -d $TMP_RESTORE_DIR ]; then
+      mkdir -p $TMP_RESTORE_DIR
+    fi
+
+    restore_fun
+    rm -rf $TMP_RESTORE_DIR
+    resetcolor;
+
+  else
+    printf "unknown input.\n"
+    exit 0
+  fi
+}
+
+# MAIN SCRIPT
+check_if_running
+finisher
+
+if [ -z "$1" ]; then
+  yellow
+  printf ">>> Use --help \n"
+  resetcolor
+
 else
-    rm -rf ${i_local_queue[@]}
-    echo -e "ّFiles: $files" | log_print
+  if [ "$1" == "--help" ]; then
+    help
+  else
+    if [ "$#" -gt "1" ]; then
+      echo -e "\tPreparing..."
+      loader $@
 
-    green;
-    echo -e "Cleaning Done." | log_print
-fi
+      case $1 in
+      --full-backup)
+        main-exporter | log_print
+        ;;
 
-resetcolor;
+      --full-restore)
+        main-importer | log_print
+        ;;
 
-
-
-### FTP
-if [ "$ftp_enable" == "yes" ] && [ $FTP_CONNECTION_STATUS == 1 ];
-then
-    is_ok=1
-
-    yellow;
-    echo -e "Cleaning remote ftp backups older than $ftp_save_last_versions last old versions..." | log_print
-    resetcolor;
-
-    i_ftp_queue=()
-    for source_file in ${i_config_files[@]};
-    do
-        sleep 1
-
-        source_file=$(echo $source_file | cut -d "." -f 2) 
-        ftp_path_dir=$ftp_save_path/$source_file
-
-        ftp -i -n $ftp_server <<EOMYF > $tmp_log
-        user $ftp_username $ftp_password
-        binary
-        cd $ftp_path_dir
-        ls --sort 
-        quit
-EOMYF
-
-        count=$(( $(cat $tmp_log | grep -v "drwxr" | wc -l) - $ftp_save_last_versions ))
-        if [ $count -gt 0 ]; 
-        then
-            ftp_dirs_list_path=$(cat $tmp_log | grep -v "drwxr" | awk '{print $NF}' | head -n $count | awk -F ' ' -v awkftp_path_dir="$ftp_path_dir/" '{print awkftp_path_dir $1}' | xargs)
-            i_ftp_queue+=($ftp_dirs_list_path)
-        fi
-      
-    done
-
-
-    if [ -z "$i_ftp_queue" ]; 
-    then
-        echo -e "ّNot need." | log_print
+      *)
+        printf "unknown input.\n"
+        ;;
+      esac
     else
-
-        ftp -i -n $ftp_server <<EOMYF 
-        user $ftp_username $ftp_password
-        binary
-        mdelete ${i_ftp_queue[@]}
-        quit
-EOMYF
-
-        echo -e "ّFiles: ${i_ftp_queue[@]}" | log_print
-
-        green;
-        echo -e "Cleaning FTP-server Done." | log_print
-
+      printf "You must pass atleast 2 arrguments.\n"
     fi
-    resetcolor;
-
+  fi
 fi
-
-
-### SSH
-if [ "$ssh_enable" == "yes" ] && [ $SSH_CONNECTION_STATUS == 1 ];
-then
-    yellow;
-    echo -e "Cleaning SSH backups older than $ssh_save_last_versions last old versions..." | log_print
-    resetcolor;
-
-    i_ssh_queue=()
-    for source_file in ${i_config_files[@]};
-    do
-        source_file=$(echo $source_file | cut -d "." -f 2)
-        ssh_path_dir=$ssh_save_path/$source_file
-
-        
-        ssh -t $ssh_username@$ssh_server -p $ssh_port -o StrictHostKeyChecking=no <<EOMYF > $tmp_log
-        ls -ltr $ssh_path_dir
-EOMYF
-
-        count=$(( $(cat $tmp_log | grep "^-r" | wc -l) - $ssh_save_last_versions ))
-        if [ $count -gt 0 ]; 
-        then
-          ssh_dirs_list_path=$(cat $tmp_log | grep "^-r" | head -n $count | awk '{print $NF}' | awk -F ' ' -v awkssh_path_dir="$ssh_path_dir/" '{print awkssh_path_dir $1}' | xargs)
-          i_ssh_queue+=($ssh_dirs_list_path)
-        fi
-
-    done
-
-
-    if [ -z "$i_ssh_queue" ]; 
-    then
-        echo -e "ّNot need." | log_print
-    else
-        ssh -t $ssh_username@$ssh_server -p $ssh_port -o StrictHostKeyChecking=no "rm -rf ${i_ssh_queue[@]}"
-        echo -e "ّFiles: $ssh_dirs_list_path" | log_print
-
-        green;
-        echo -e "Cleaning Done." | log_print
-    fi
-    resetcolor;
-fi
-
-
-
-########## Final ###########
-echo -e "" | log_print
-green;
-echo -e "*** Backup finished ***" | log_print
-resetcolor;
-echo -e "Backup files:" | log_print
-
-for res in ${i_result_files[@]};
-do
-    res=$(echo $res | sed "s/\/\//\//")
-    archive_size=$(ls -lh $res | awk '{print  $5}')
-    yellow;
-    echo -e "$res : $archive_size" | log_print
-    resetcolor;
-done
-
-rm -rf $tmp_log
-exit 0
